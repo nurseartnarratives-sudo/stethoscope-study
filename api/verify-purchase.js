@@ -11,7 +11,8 @@ export default async function handler(req, res) {
     // Retrieve the Stripe checkout session
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    if (session.payment_status !== 'paid' && session.status !== 'complete') {
+    const validStatuses = ['paid', 'no_payment_required'];
+    if (!validStatuses.includes(session.payment_status) && session.status !== 'complete') {
       return res.status(400).json({ error: 'Payment not completed' });
     }
 
