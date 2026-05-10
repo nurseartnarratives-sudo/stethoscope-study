@@ -62,6 +62,7 @@ export default async function handler(req, res) {
       line_items: [{ price: product.priceId, quantity: 1 }],
       success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}&product=${productType}`,
       cancel_url: `${appUrl}`,
+      allow_promotion_codes: true,
       customer_email: userEmail || undefined,
       metadata: {
         productType,
