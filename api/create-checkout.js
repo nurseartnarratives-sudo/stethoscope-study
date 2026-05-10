@@ -1,36 +1,45 @@
-import Stripe from 'stripe';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-// Map product types to Stripe price IDs and Clerk access tiers
-// You'll fill in the price IDs after creating products in Stripe dashboard
-const PRODUCTS = {
-  monthly: {
-    priceId: process.env.STRIPE_PRICE_MONTHLY,
-    mode: 'subscription',
-    accessTier: 'monthly',
-  },
-  lifetime: {
-    priceId: process.env.STRIPE_PRICE_LIFETIME,
-    mode: 'payment',
-    accessTier: 'lifetime',
-  },
-  pdf: {
-    priceId: process.env.STRIPE_PRICE_PDF,
-    mode: 'payment',
-    accessTier: null, // PDF only — no app access
-  },
-  bundle: {
-    priceId: process.env.STRIPE_PRICE_BUNDLE,
-    mode: 'payment',
-    accessTier: 'bundle',
-  },
-};
-
 export default async function handler(req, res) {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Check required env vars
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.error('Missing STRIPE_SECRET_KEY');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  const { default: Stripe } = await import('stripe');
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+  const PRODUCTS = {
+    monthly: {
+      priceId: process.env.STRIPE_PRICE_MONTHLY,
+      mode: 'subscription',
+      accessTier: 'monthly',
+    },
+    lifetime: {
+      priceId: process.env.STRIPE_PRICE_LIFETIME,
+      mode: 'payment',
+      accessTier: 'lifetime',
+    },
+    pdf: {
+      priceId: process.env.STRIPE_PRICE_PDF,
+      mode: 'payment',
+      accessTier: null,
+    },
+    bundle: {
+      priceId: process.env.STRIPE_PRICE_BUNDLE,
+      mode: 'payment',
+      accessTier: 'bundle',
+    },
+  };
 
   const { productType, userId, userEmail } = req.body;
 
@@ -39,6 +48,12 @@ export default async function handler(req, res) {
   }
 
   const product = PRODUCTS[productType];
+
+  if (!product.priceId) {
+    console.error(`Missing price ID for product: ${productType}`);
+    return res.status(500).json({ error: 'Product not configured' });
+  }
+
   const appUrl = process.env.VITE_APP_URL || 'https://study.thenuttynurse.com';
 
   try {
