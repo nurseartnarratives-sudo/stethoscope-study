@@ -16,7 +16,7 @@ const PRODUCT_LABELS = {
   monthly: "Monthly Access",
   lifetime: "Lifetime Access",
   pdf: "PDF Study Guide",
-  bundle: "Lifetime Bundle",
+  bundle: "Lifetime Bundle — App Access + PDF Study Guide",
 };
 
 export default function SuccessPage() {
@@ -28,7 +28,7 @@ export default function SuccessPage() {
   const { user } = useUser();
 
   const [status, setStatus] = useState("idle"); // idle | verifying | granted | pdf_only | error
-  const isPdfOnly = product === "pdf";
+  const isPdfOnly = product === "pdf"; // bundle is NOT pdf-only — it includes app access too
 
   // Once signed in, verify the purchase and grant access
   useEffect(() => {
@@ -113,6 +113,24 @@ export default function SuccessPage() {
                 Check out the app →
               </a>
             </p>
+          </div>
+        )}
+
+        {/* Bundle — PDF sent + app access coming */}
+        {product === "bundle" && !isPdfOnly && isSignedIn && status === "idle" && (
+          <div style={{
+            background: "#FFF8E7",
+            border: "1px solid #D4A017",
+            borderRadius: 8,
+            padding: "14px 16px",
+            marginBottom: 20,
+            color: C.gray,
+            fontSize: 14,
+            textAlign: "left",
+          }}>
+            <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.crimson }}>🎁 Your Bundle includes:</p>
+            <p style={{ margin: "4px 0" }}>📄 PDF Study Guide — sent to your email</p>
+            <p style={{ margin: "4px 0" }}>🩺 Lifetime App Access — activating now…</p>
           </div>
         )}
 
