@@ -44,7 +44,7 @@ async function sendPdfEmail(userEmail) {
 
   await resend.emails.send({
     from: 'Stethoscope Study <study@thenuttynurse.com>',
-    reply_to: 'study@thenuttynurse.com',
+    reply_to: 'nurse.artnarratives@gmail.com',
     to: userEmail,
     subject: '🩺 Your HESI A2 & TEAS 7 Master Study Guide',
     html: `
@@ -70,7 +70,7 @@ async function sendPdfEmail(userEmail) {
           </div>
           <p style="color: #555; font-size: 13px;">
             Questions? Reply to this email or reach us at
-            <a href="mailto:study@thenuttynurse.com" style="color: #8B0000;">study@thenuttynurse.com</a>
+            <a href="mailto:nurse.artnarratives@gmail.com" style="color: #8B0000;">nurse.artnarratives@gmail.com</a>
           </p>
           <p style="color: #8B0000; font-weight: bold; margin-bottom: 0;">Good luck — you've got this! 🩺</p>
           <p style="color: #555; font-size: 13px; margin-top: 4px;">— Tina, The Nutty Nurse</p>
