@@ -1,5 +1,5 @@
 import { useUser, useAuth } from "@clerk/clerk-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import LandingGate from "./LandingGate.jsx";
 import RenewalPage from "./RenewalPage.jsx";
 import UserMenu from "./UserMenu.jsx";
@@ -7,35 +7,51 @@ import App from "./App.jsx";
 
 const LOGO_PLACEHOLDER = null;
 
-async function startCheckout(productType, userId, userEmail) {
-  const res = await fetch("/api/create-checkout", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ productType, userId, userEmail }),
-  });
-  const data = await res.json();
-  if (data.url) {
-    window.location.href = data.url;
-  }
-}
-
 export default function AuthWrapper() {
   const { isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
+  const [activating, setActivating] = useState(false);
 
-  // After sign-in, check if user had a pending product selected before signing in
+  // After sign-in, check if there's a pending purchase to activate
   useEffect(() => {
-    if (!isSignedIn || !user) return;
-    const pending = sessionStorage.getItem("pendingProduct");
-    if (pending) {
-      sessionStorage.removeItem("pendingProduct");
-      const email = user.emailAddresses?.[0]?.emailAddress || "";
-      startCheckout(pending, user.id, email);
-    }
-  }, [isSignedIn, user]);
+    if (!isLoaded || !isSignedIn || !user) return;
 
-  // While Clerk loads, show a minimal splash
-  if (!isLoaded) {
+    const pendingSessionId = localStorage.getItem("pendingSessionId");
+    if (!pendingSessionId) return;
+
+    // Clear immediately so we don't retry
+    localStorage.removeItem("pendingSessionId");
+    localStorage.removeItem("pendingProduct");
+
+    setActivating(true);
+
+    fetch("/api/verify-purchase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: pendingSessionId,
+        userId: user.id,
+        userEmail: user.emailAddresses?.[0]?.emailAddress || "",
+      }),
+    })
+      .then((r) => r.json())
+      .then(async (data) => {
+        if (data.success) {
+          console.log("✅ Access activated:", data.accessTier);
+          await user.reload(); // Refresh Clerk metadata
+        } else {
+          console.error("Verify purchase failed:", data.error);
+        }
+        setActivating(false);
+      })
+      .catch((err) => {
+        console.error("Verify purchase error:", err);
+        setActivating(false);
+      });
+  }, [isLoaded, isSignedIn, user]);
+
+  // Loading state
+  if (!isLoaded || activating) {
     return (
       <div style={{
         minHeight: "100vh",
@@ -47,21 +63,22 @@ export default function AuthWrapper() {
       }}>
         <div style={{ textAlign: "center", color: "#8B0000" }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>🩺</div>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>Loading Stethoscope Study…</div>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>
+            {activating ? "Activating your access…" : "Loading Stethoscope Study…"}
+          </div>
         </div>
       </div>
     );
   }
 
-  // Not signed in → show landing page with pricing
+  // Not signed in
   if (!isSignedIn) {
     return <LandingGate logoSrc={LOGO_PLACEHOLDER} />;
   }
 
-  // Signed in — check access tier
   const tier = user?.publicMetadata?.access_tier;
 
-  // No tier yet — check if we're waiting for a pending purchase
+  // No tier yet
   if (!tier) {
     return (
       <div style={{
@@ -81,20 +98,27 @@ export default function AuthWrapper() {
           Access Pending
         </h2>
         <p style={{ color: "#555", maxWidth: 400, lineHeight: 1.6 }}>
-          Your account has been created but your access tier hasn't been set yet.
-          If you've already purchased, please allow a few minutes and refresh — or
-          contact support.
+          Your account was created but access hasn't been activated yet.
+          If you just purchased, please wait a moment and refresh the page.
         </p>
-        <a
-          href="mailto:nurse.artnarratives@gmail.com"
+        <button
+          onClick={() => window.location.reload()}
           style={{
             background: "#8B0000",
             color: "#fff",
             padding: "12px 28px",
             borderRadius: 8,
             fontWeight: 700,
-            textDecoration: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: 15,
           }}
+        >
+          Refresh
+        </button>
+        <a
+          href="mailto:nurse.artnarratives@gmail.com"
+          style={{ color: "#8B0000", fontSize: 14, fontWeight: 600 }}
         >
           Contact Support
         </a>
@@ -102,20 +126,15 @@ export default function AuthWrapper() {
     );
   }
 
-  // Monthly tier with lapsed access
+  // Expired monthly
   if (tier === "monthly_expired") {
     return <RenewalPage logoSrc={LOGO_PLACEHOLDER} />;
   }
 
-  // Valid access → show the app with user menu overlay
+  // Valid access
   return (
     <div style={{ position: "relative" }}>
-      <div style={{
-        position: "fixed",
-        top: 12,
-        right: 16,
-        zIndex: 9999,
-      }}>
+      <div style={{ position: "fixed", top: 12, right: 16, zIndex: 9999 }}>
         <UserMenu />
       </div>
       <App />

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useUser, useAuth, SignIn } from "@clerk/clerk-react";
+import { useEffect } from "react";
+import { useAuth, SignIn } from "@clerk/clerk-react";
 
 const C = {
   crimson: "#8B0000",
@@ -23,44 +23,24 @@ export default function SuccessPage() {
   const params = new URLSearchParams(window.location.search);
   const sessionId = params.get("session_id");
   const product = params.get("product") || "monthly";
+  const isPdfOnly = product === "pdf";
 
   const { isLoaded, isSignedIn } = useAuth();
-  const { user } = useUser();
 
-  const [status, setStatus] = useState("idle"); // idle | verifying | granted | pdf_only | error
-  const isPdfOnly = product === "pdf"; // bundle is NOT pdf-only — it includes app access too
-
-  // Once signed in, verify the purchase and grant access
+  // Save session to localStorage so AuthWrapper can grant access after sign-in
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || !user || !sessionId) return;
-    if (status !== "idle") return;
+    if (sessionId && !isPdfOnly) {
+      localStorage.setItem("pendingSessionId", sessionId);
+      localStorage.setItem("pendingProduct", product);
+    }
+  }, [sessionId, product, isPdfOnly]);
 
-    setStatus("verifying");
-
-    fetch("/api/verify-purchase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        userId: user.id,
-        userEmail: user.emailAddresses?.[0]?.emailAddress || "",
-      }),
-    })
-      .then((r) => r.json())
-      .then(async (data) => {
-        if (data.success) {
-          setStatus(data.accessTier ? "granted" : "pdf_only");
-          if (data.accessTier) {
-            // Reload Clerk user so metadata is fresh before redirecting
-            await user.reload();
-            setTimeout(() => { window.location.href = "/"; }, 2000);
-          }
-        } else {
-          setStatus("error");
-        }
-      })
-      .catch(() => setStatus("error"));
-  }, [isLoaded, isSignedIn, user, sessionId, status]);
+  // If already signed in, redirect to app — AuthWrapper will handle verify-purchase
+  useEffect(() => {
+    if (isLoaded && isSignedIn && !isPdfOnly) {
+      window.location.href = "/";
+    }
+  }, [isLoaded, isSignedIn, isPdfOnly]);
 
   return (
     <div style={{
@@ -82,8 +62,6 @@ export default function SuccessPage() {
         textAlign: "center",
         boxShadow: "0 8px 30px rgba(0,0,0,0.1)",
       }}>
-
-        {/* Payment confirmed banner — always show */}
         <div style={{ fontSize: 52, marginBottom: 12 }}>🎉</div>
         <h1 style={{ color: C.crimson, fontSize: 24, fontWeight: 800, marginBottom: 8 }}>
           Payment Confirmed!
@@ -101,12 +79,12 @@ export default function SuccessPage() {
           ✓ {PRODUCT_LABELS[product] || "Purchase"} — payment received
         </div>
 
-        {/* PDF only — no sign in needed */}
+        {/* PDF only */}
         {isPdfOnly && (
           <div>
             <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7 }}>
-              Your <strong>HESI A2 &amp; TEAS 7 Master Study Guide</strong> has been sent
-              to your email. Check your inbox (and spam folder just in case)!
+              Your <strong>HESI A2 &amp; TEAS 7 Master Study Guide</strong> has been
+              sent to your email. Check your inbox (and spam folder just in case)!
             </p>
             <p style={{ marginTop: 16, color: C.gray, fontSize: 14 }}>
               Want interactive study tools too?{" "}
@@ -117,93 +95,30 @@ export default function SuccessPage() {
           </div>
         )}
 
-        {/* Bundle — PDF sent + app access coming */}
-        {product === "bundle" && !isPdfOnly && isSignedIn && status === "idle" && (
-          <div style={{
-            background: "#FFF8E7",
-            border: "1px solid #D4A017",
-            borderRadius: 8,
-            padding: "14px 16px",
-            marginBottom: 20,
-            color: C.gray,
-            fontSize: 14,
-            textAlign: "left",
-          }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.crimson }}>🎁 Your Bundle includes:</p>
-            <p style={{ margin: "4px 0" }}>📄 PDF Study Guide — sent to your email</p>
-            <p style={{ margin: "4px 0" }}>🩺 Lifetime App Access — activating now…</p>
+        {/* App access products — prompt sign in/up */}
+        {!isPdfOnly && isLoaded && !isSignedIn && (
+          <div>
+            <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7, marginBottom: 20 }}>
+              <strong>One last step!</strong> Create your free account to activate
+              your access. Use the <strong>same email</strong> you used at checkout.
+            </p>
+            <div style={{ transform: "scale(0.92)", transformOrigin: "top center" }}>
+              <SignIn
+                routing="hash"
+                afterSignInUrl="/"
+                afterSignUpUrl="/"
+              />
+            </div>
           </div>
         )}
 
-        {/* Access products — need to sign in */}
-        {!isPdfOnly && (
-          <>
-            {/* Not yet signed in — show sign in */}
-            {isLoaded && !isSignedIn && (
-              <div>
-                <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7, marginBottom: 20 }}>
-                  <strong>One last step</strong> — create your account or sign in to
-                  activate your access. Use the <strong>same email</strong> you used at checkout.
-                </p>
-                <div style={{ transform: "scale(0.92)", transformOrigin: "top center" }}>
-                  <SignIn
-                    routing="hash"
-                    afterSignInUrl={window.location.href}
-                    afterSignUpUrl={window.location.href}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Verifying purchase */}
-            {isSignedIn && status === "verifying" && (
-              <div>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
-                <p style={{ color: C.gray, fontSize: 15 }}>Activating your access…</p>
-              </div>
-            )}
-
-            {/* Access granted */}
-            {status === "granted" && (
-              <div>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>🩺</div>
-                <h2 style={{ color: C.green, fontSize: 20, fontWeight: 800, marginBottom: 8 }}>
-                  Access Activated!
-                </h2>
-                <p style={{ color: C.gray, fontSize: 15, marginBottom: 20 }}>
-                  You're all set! Redirecting you to the app in a moment…
-                </p>
-                <a href="/" style={{
-                  display: "inline-block",
-                  background: C.crimson,
-                  color: C.white,
-                  padding: "12px 32px",
-                  borderRadius: 8,
-                  fontWeight: 700,
-                  textDecoration: "none",
-                  fontSize: 15,
-                }}>
-                  Go to App Now →
-                </a>
-              </div>
-            )}
-
-            {/* Error */}
-            {status === "error" && (
-              <div>
-                <p style={{ color: C.crimson, fontSize: 15, marginBottom: 12 }}>
-                  Something went wrong activating your access.
-                </p>
-                <p style={{ color: C.gray, fontSize: 14 }}>
-                  Please email{" "}
-                  <a href="mailto:nurse.artnarratives@gmail.com" style={{ color: C.crimson }}>
-                    nurse.artnarratives@gmail.com
-                  </a>{" "}
-                  and we'll sort it out right away!
-                </p>
-              </div>
-            )}
-          </>
+        {/* Already signed in — redirecting */}
+        {!isPdfOnly && isLoaded && isSignedIn && (
+          <div>
+            <p style={{ color: C.gray, fontSize: 15 }}>
+              Activating your access…
+            </p>
+          </div>
         )}
       </div>
     </div>
