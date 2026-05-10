@@ -1,4 +1,4 @@
-import { SignInButton, useUser } from "@clerk/clerk-react";
+import { SignInButton, useUser, useClerk } from "@clerk/clerk-react";
 import { useState } from "react";
 
 const C = {
@@ -76,6 +76,7 @@ async function startCheckout(productType, userId, userEmail) {
 
 export default function LandingGate({ logoSrc }) {
   const { user } = useUser();
+  const { openSignIn } = useClerk();
   const [loading, setLoading] = useState(null);
   return (
     <div style={{
@@ -282,11 +283,17 @@ export default function LandingGate({ logoSrc }) {
 
             <button
               onClick={async () => {
+                if (!user) {
+                  // Save chosen product then prompt sign in
+                  sessionStorage.setItem("pendingProduct", tier.id);
+                  openSignIn();
+                  return;
+                }
                 setLoading(tier.id);
                 await startCheckout(
                   tier.id,
-                  user?.id || "",
-                  user?.emailAddresses?.[0]?.emailAddress || ""
+                  user.id,
+                  user.emailAddresses?.[0]?.emailAddress || ""
                 );
                 setLoading(null);
               }}

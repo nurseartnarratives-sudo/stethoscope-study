@@ -1,16 +1,38 @@
 import { useUser, useAuth } from "@clerk/clerk-react";
+import { useEffect } from "react";
 import LandingGate from "./LandingGate.jsx";
 import RenewalPage from "./RenewalPage.jsx";
 import UserMenu from "./UserMenu.jsx";
 import App from "./App.jsx";
 
-// The LOGO is defined inside App.jsx — we re-export it here for the gate pages
-// It's a base64 PNG embedded in the original file
-const LOGO_PLACEHOLDER = null; // Clerk gate pages will work without logo if not passed
+const LOGO_PLACEHOLDER = null;
+
+async function startCheckout(productType, userId, userEmail) {
+  const res = await fetch("/api/create-checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productType, userId, userEmail }),
+  });
+  const data = await res.json();
+  if (data.url) {
+    window.location.href = data.url;
+  }
+}
 
 export default function AuthWrapper() {
   const { isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
+
+  // After sign-in, check if user had a pending product selected before signing in
+  useEffect(() => {
+    if (!isSignedIn || !user) return;
+    const pending = sessionStorage.getItem("pendingProduct");
+    if (pending) {
+      sessionStorage.removeItem("pendingProduct");
+      const email = user.emailAddresses?.[0]?.emailAddress || "";
+      startCheckout(pending, user.id, email);
+    }
+  }, [isSignedIn, user]);
 
   // While Clerk loads, show a minimal splash
   if (!isLoaded) {
@@ -39,9 +61,7 @@ export default function AuthWrapper() {
   // Signed in — check access tier
   const tier = user?.publicMetadata?.access_tier;
 
-  // Monthly users: check if their subscription is still active
-  // You set access_tier = null or remove it when subscription lapses
-  // If they're signed in but have no tier at all, show renewal
+  // No tier yet — check if we're waiting for a pending purchase
   if (!tier) {
     return (
       <div style={{
@@ -87,10 +107,9 @@ export default function AuthWrapper() {
     return <RenewalPage logoSrc={LOGO_PLACEHOLDER} />;
   }
 
-  // Valid access (monthly, lifetime, or bundle) → show the app with user menu overlay
+  // Valid access → show the app with user menu overlay
   return (
     <div style={{ position: "relative" }}>
-      {/* Floating user menu — sits on top of the app in the top-right corner */}
       <div style={{
         position: "fixed",
         top: 12,
@@ -99,8 +118,6 @@ export default function AuthWrapper() {
       }}>
         <UserMenu />
       </div>
-
-      {/* The full app */}
       <App />
     </div>
   );
