@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useUser, useAuth, SignIn } from "@clerk/clerk-react";
 
 const C = {
   crimson: "#8B0000",
@@ -11,53 +12,54 @@ const C = {
   greenBg: "#EAF3DE",
 };
 
-const MESSAGES = {
-  monthly: {
-    icon: "🎉",
-    title: "Welcome to Stethoscope Study!",
-    body: "Your monthly access is now active. You can sign in and start studying right away!",
-    showAppButton: true,
-  },
-  lifetime: {
-    icon: "🏆",
-    title: "Lifetime Access Unlocked!",
-    body: "You have lifetime access to Stethoscope Study — no renewals, ever. Let's get studying!",
-    showAppButton: true,
-  },
-  pdf: {
-    icon: "📄",
-    title: "Your Study Guide is on its way!",
-    body: "Check your email — your HESI A2 & TEAS 7 Master Study Guide PDF has been sent. Don't forget to check your spam folder if you don't see it within a few minutes.",
-    showAppButton: false,
-  },
-  bundle: {
-    icon: "🎁",
-    title: "Bundle Unlocked!",
-    body: "Your lifetime app access is active AND your PDF Study Guide has been sent to your email. You're fully equipped — go ace that exam!",
-    showAppButton: true,
-  },
+const PRODUCT_LABELS = {
+  monthly: "Monthly Access",
+  lifetime: "Lifetime Access",
+  pdf: "PDF Study Guide",
+  bundle: "Lifetime Bundle",
 };
 
 export default function SuccessPage() {
-  const [countdown, setCountdown] = useState(10);
   const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get("session_id");
   const product = params.get("product") || "monthly";
-  const msg = MESSAGES[product] || MESSAGES.monthly;
 
+  const { isLoaded, isSignedIn } = useAuth();
+  const { user } = useUser();
+
+  const [status, setStatus] = useState("idle"); // idle | verifying | granted | pdf_only | error
+  const isPdfOnly = product === "pdf";
+
+  // Once signed in, verify the purchase and grant access
   useEffect(() => {
-    if (!msg.showAppButton) return;
-    const timer = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(timer);
-          window.location.href = "/";
-          return 0;
+    if (!isLoaded || !isSignedIn || !user || !sessionId) return;
+    if (status !== "idle") return;
+
+    setStatus("verifying");
+
+    fetch("/api/verify-purchase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        userId: user.id,
+        userEmail: user.emailAddresses?.[0]?.emailAddress || "",
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setStatus(data.accessTier ? "granted" : "pdf_only");
+          // Redirect to app after 3 seconds if access was granted
+          if (data.accessTier) {
+            setTimeout(() => { window.location.href = "/"; }, 3000);
+          }
+        } else {
+          setStatus("error");
         }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [msg.showAppButton]);
+      })
+      .catch(() => setStatus("error"));
+  }, [isLoaded, isSignedIn, user, sessionId, status]);
 
   return (
     <div style={{
@@ -74,95 +76,116 @@ export default function SuccessPage() {
         border: `2px solid ${C.gold}`,
         borderRadius: 16,
         padding: "48px 40px",
-        maxWidth: 500,
+        maxWidth: 520,
         width: "100%",
         textAlign: "center",
         boxShadow: "0 8px 30px rgba(0,0,0,0.1)",
       }}>
-        <div style={{ fontSize: 60, marginBottom: 16 }}>{msg.icon}</div>
 
-        <h1 style={{
-          color: C.crimson,
-          fontSize: 26,
-          fontWeight: 800,
-          marginBottom: 16,
-        }}>
-          {msg.title}
+        {/* Payment confirmed banner — always show */}
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🎉</div>
+        <h1 style={{ color: C.crimson, fontSize: 24, fontWeight: 800, marginBottom: 8 }}>
+          Payment Confirmed!
         </h1>
-
         <div style={{
           background: C.greenBg,
-          border: `1px solid #639922`,
+          border: "1px solid #639922",
           borderRadius: 8,
-          padding: "12px 16px",
-          marginBottom: 20,
+          padding: "10px 16px",
+          marginBottom: 24,
           color: C.green,
           fontWeight: 600,
-          fontSize: 15,
+          fontSize: 14,
         }}>
-          ✓ Payment confirmed
+          ✓ {PRODUCT_LABELS[product] || "Purchase"} — payment received
         </div>
 
-        <p style={{
-          color: C.gray,
-          fontSize: 15,
-          lineHeight: 1.7,
-          marginBottom: 28,
-        }}>
-          {msg.body}
-        </p>
-
-        {msg.showAppButton && (
-          <>
-            <a
-              href="/"
-              style={{
-                display: "block",
-                background: C.crimson,
-                color: C.white,
-                padding: "14px 0",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: 16,
-                textDecoration: "none",
-                marginBottom: 12,
-              }}
-            >
-              Go to the App →
-            </a>
-            <p style={{ color: C.gray, fontSize: 13, margin: 0 }}>
-              Redirecting automatically in {countdown} seconds…
+        {/* PDF only — no sign in needed */}
+        {isPdfOnly && (
+          <div>
+            <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7 }}>
+              Your <strong>HESI A2 &amp; TEAS 7 Master Study Guide</strong> has been sent
+              to your email. Check your inbox (and spam folder just in case)!
             </p>
+            <p style={{ marginTop: 16, color: C.gray, fontSize: 14 }}>
+              Want interactive study tools too?{" "}
+              <a href="/" style={{ color: C.crimson, fontWeight: 600 }}>
+                Check out the app →
+              </a>
+            </p>
+          </div>
+        )}
+
+        {/* Access products — need to sign in */}
+        {!isPdfOnly && (
+          <>
+            {/* Not yet signed in — show sign in */}
+            {isLoaded && !isSignedIn && (
+              <div>
+                <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7, marginBottom: 20 }}>
+                  <strong>One last step</strong> — create your account or sign in to
+                  activate your access. Use the <strong>same email</strong> you used at checkout.
+                </p>
+                <div style={{ transform: "scale(0.92)", transformOrigin: "top center" }}>
+                  <SignIn
+                    routing="hash"
+                    afterSignInUrl={window.location.href}
+                    afterSignUpUrl={window.location.href}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Verifying purchase */}
+            {isSignedIn && status === "verifying" && (
+              <div>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
+                <p style={{ color: C.gray, fontSize: 15 }}>Activating your access…</p>
+              </div>
+            )}
+
+            {/* Access granted */}
+            {status === "granted" && (
+              <div>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🩺</div>
+                <h2 style={{ color: C.green, fontSize: 20, fontWeight: 800, marginBottom: 8 }}>
+                  Access Activated!
+                </h2>
+                <p style={{ color: C.gray, fontSize: 15, marginBottom: 20 }}>
+                  You're all set! Redirecting you to the app in a moment…
+                </p>
+                <a href="/" style={{
+                  display: "inline-block",
+                  background: C.crimson,
+                  color: C.white,
+                  padding: "12px 32px",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  fontSize: 15,
+                }}>
+                  Go to App Now →
+                </a>
+              </div>
+            )}
+
+            {/* Error */}
+            {status === "error" && (
+              <div>
+                <p style={{ color: C.crimson, fontSize: 15, marginBottom: 12 }}>
+                  Something went wrong activating your access.
+                </p>
+                <p style={{ color: C.gray, fontSize: 14 }}>
+                  Please email{" "}
+                  <a href="mailto:nurse.artnarratives@gmail.com" style={{ color: C.crimson }}>
+                    nurse.artnarratives@gmail.com
+                  </a>{" "}
+                  and we'll sort it out right away!
+                </p>
+              </div>
+            )}
           </>
         )}
-
-        {!msg.showAppButton && (
-          <a
-            href="https://study.thenuttynurse.com"
-            style={{
-              display: "inline-block",
-              background: C.crimson,
-              color: C.white,
-              padding: "12px 28px",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: 15,
-              textDecoration: "none",
-            }}
-          >
-            Check out the Study App too →
-          </a>
-        )}
-
-        <p style={{
-          color: C.gray,
-          fontSize: 12,
-          marginTop: 24,
-          borderTop: "1px solid #f0f0f0",
-          paddingTop: 16,
-        }}>
-          Questions? Email <a href="mailto:nurse.artnarratives@gmail.com" style={{ color: C.crimson }}>nurse.artnarratives@gmail.com</a>
-        </p>
       </div>
     </div>
   );

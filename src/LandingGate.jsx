@@ -283,17 +283,11 @@ export default function LandingGate({ logoSrc }) {
 
             <button
               onClick={async () => {
-                if (!user) {
-                  // Save chosen product then prompt sign in
-                  sessionStorage.setItem("pendingProduct", tier.id);
-                  openSignIn();
-                  return;
-                }
                 setLoading(tier.id);
                 await startCheckout(
                   tier.id,
-                  user.id,
-                  user.emailAddresses?.[0]?.emailAddress || ""
+                  user?.id || "",
+                  user?.emailAddresses?.[0]?.emailAddress || ""
                 );
                 setLoading(null);
               }}
