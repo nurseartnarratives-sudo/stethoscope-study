@@ -1,15 +1,20 @@
-import Stripe from 'stripe';
 import { Resend } from 'resend';
 import fs from 'fs';
 import path from 'path';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Read raw body from request stream — required for Stripe signature verification
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
 
 // Clerk Backend API helper
 async function setClerkAccessTier(userId, accessTier) {
   if (!userId || !accessTier) return;
-
   const response = await fetch(
     `https://api.clerk.com/v1/users/${userId}/metadata`,
     {
@@ -23,17 +28,16 @@ async function setClerkAccessTier(userId, accessTier) {
       }),
     }
   );
-
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`Clerk metadata update failed: ${err}`);
   }
-
   console.log(`✅ Clerk access_tier set to "${accessTier}" for user ${userId}`);
 }
 
 // Send PDF via Resend
 async function sendPdfEmail(userEmail) {
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const pdfPath = path.join(process.cwd(), 'api', 'assets', 'Stethoscope_Study_Guide.pdf');
   const pdfBuffer = fs.readFileSync(pdfPath);
   const pdfBase64 = pdfBuffer.toString('base64');
@@ -54,9 +58,7 @@ async function sendPdfEmail(userEmail) {
             Thank you for your purchase! Your <strong>HESI A2 &amp; TEAS 7 Master Study Guide</strong>
             is attached to this email as a PDF.
           </p>
-          <p style="color: #555; line-height: 1.6;">
-            Save it to your device so you can study anytime — even offline!
-          </p>
+          <p style="color: #555; line-height: 1.6;">Save it to your device so you can study anytime — even offline!</p>
           <div style="background: #FFF8E7; border: 1px solid #D4A017; border-radius: 8px; padding: 16px; margin: 24px 0;">
             <p style="margin: 0; color: #8B0000; font-weight: bold;">💛 Study tip:</p>
             <p style="margin: 8px 0 0; color: #555; font-size: 14px;">
@@ -81,24 +83,22 @@ async function sendPdfEmail(userEmail) {
       },
     ],
   });
-
   console.log(`✅ PDF email sent to ${userEmail}`);
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method not allowed');
-  }
+  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
+  // Get raw body BEFORE any parsing
+  const rawBody = await getRawBody(req);
   const sig = req.headers['stripe-signature'];
-  let event;
 
+  const { default: Stripe } = await import('stripe');
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+  let event;
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     console.error('Webhook signature error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -110,65 +110,50 @@ export default async function handler(req, res) {
     // ── One-time payment completed ──────────────────────────────────────────
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      const { productType, userId, accessTier } = session.metadata;
+      const customerEmail = session.customer_details?.email;
 
-      // Only handle one-time payments here (subscriptions handled separately)
       if (session.mode === 'payment') {
-        const { productType, userId, accessTier } = session.metadata;
-        const customerEmail = session.customer_details?.email;
-
-        // Set Clerk access tier for app products
+        // Set Clerk access tier if user was signed in
         if (userId && accessTier) {
           await setClerkAccessTier(userId, accessTier);
         }
-
         // Send PDF for pdf and bundle products
         if ((productType === 'pdf' || productType === 'bundle') && customerEmail) {
           await sendPdfEmail(customerEmail);
         }
       }
 
-      // Subscription payment — set monthly access
-      if (session.mode === 'subscription') {
-        const { userId } = session.metadata;
-        if (userId) {
-          await setClerkAccessTier(userId, 'monthly');
-        }
+      // Subscription first payment
+      if (session.mode === 'subscription' && userId) {
+        await setClerkAccessTier(userId, 'monthly');
       }
     }
 
-    // ── Subscription renewed successfully ───────────────────────────────────
+    // ── Subscription renewed ────────────────────────────────────────────────
     if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
       if (invoice.billing_reason === 'subscription_cycle') {
-        const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+        const stripe2 = new Stripe(process.env.STRIPE_SECRET_KEY);
+        const subscription = await stripe2.subscriptions.retrieve(invoice.subscription);
         const userId = subscription.metadata?.userId;
-        if (userId) {
-          await setClerkAccessTier(userId, 'monthly');
-          console.log(`🔄 Monthly subscription renewed for user ${userId}`);
-        }
+        if (userId) await setClerkAccessTier(userId, 'monthly');
       }
     }
 
     // ── Subscription cancelled or payment failed ────────────────────────────
-    if (
-      event.type === 'customer.subscription.deleted' ||
-      event.type === 'invoice.payment_failed'
-    ) {
+    if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
+      const stripe2 = new Stripe(process.env.STRIPE_SECRET_KEY);
       let userId;
-
       if (event.type === 'customer.subscription.deleted') {
         userId = event.data.object.metadata?.userId;
       } else {
-        const invoice = event.data.object;
-        const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
-        userId = subscription.metadata?.userId;
+        const sub = await stripe2.subscriptions.retrieve(event.data.object.subscription);
+        userId = sub.metadata?.userId;
       }
-
-      if (userId) {
-        await setClerkAccessTier(userId, 'monthly_expired');
-        console.log(`🚫 Access revoked for user ${userId}`);
-      }
+      if (userId) await setClerkAccessTier(userId, 'monthly_expired');
     }
+
   } catch (err) {
     console.error('Webhook handler error:', err);
     return res.status(500).json({ error: err.message });
@@ -176,8 +161,3 @@ export default async function handler(req, res) {
 
   res.status(200).json({ received: true });
 }
-
-// Vercel needs raw body for Stripe signature verification
-export const config = {
-  api: { bodyParser: false },
-};
