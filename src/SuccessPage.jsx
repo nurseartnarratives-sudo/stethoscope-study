@@ -47,12 +47,13 @@ export default function SuccessPage() {
       }),
     })
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         if (data.success) {
           setStatus(data.accessTier ? "granted" : "pdf_only");
-          // Redirect to app after 3 seconds if access was granted
           if (data.accessTier) {
-            setTimeout(() => { window.location.href = "/"; }, 3000);
+            // Reload Clerk user so metadata is fresh before redirecting
+            await user.reload();
+            setTimeout(() => { window.location.href = "/"; }, 2000);
           }
         } else {
           setStatus("error");
