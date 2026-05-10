@@ -35,6 +35,33 @@ async function setClerkAccessTier(userId, accessTier) {
   console.log(`✅ Clerk access_tier set to "${accessTier}" for user ${userId}`);
 }
 
+// Look up Clerk user by email and set their access tier
+async function setClerkAccessTierByEmail(email, accessTier) {
+  if (!email || !accessTier) return false;
+
+  // Search for user by email
+  const searchRes = await fetch(
+    `https://api.clerk.com/v1/users?email_address=${encodeURIComponent(email)}&limit=1`,
+    {
+      headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
+    }
+  );
+
+  if (!searchRes.ok) {
+    console.error('Clerk user search failed:', await searchRes.text());
+    return false;
+  }
+
+  const users = await searchRes.json();
+  if (!users.length) {
+    console.log(`No Clerk user found for email ${email} — will be set on first sign-in`);
+    return false;
+  }
+
+  await setClerkAccessTier(users[0].id, accessTier);
+  return true;
+}
+
 // Send PDF via Resend
 async function sendPdfEmail(userEmail) {
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -115,9 +142,13 @@ export default async function handler(req, res) {
       const customerEmail = session.customer_details?.email;
 
       if (session.mode === 'payment') {
-        // Set Clerk access tier if user was signed in
-        if (userId && accessTier) {
-          await setClerkAccessTier(userId, accessTier);
+        // Set Clerk access tier — by userId if signed in, otherwise by email
+        if (accessTier) {
+          if (userId) {
+            await setClerkAccessTier(userId, accessTier);
+          } else if (customerEmail) {
+            await setClerkAccessTierByEmail(customerEmail, accessTier);
+          }
         }
         // Send PDF for pdf and bundle products
         if ((productType === 'pdf' || productType === 'bundle') && customerEmail) {
@@ -126,8 +157,12 @@ export default async function handler(req, res) {
       }
 
       // Subscription first payment
-      if (session.mode === 'subscription' && userId) {
-        await setClerkAccessTier(userId, 'monthly');
+      if (session.mode === 'subscription') {
+        if (userId) {
+          await setClerkAccessTier(userId, 'monthly');
+        } else if (customerEmail) {
+          await setClerkAccessTierByEmail(customerEmail, 'monthly');
+        }
       }
     }
 
