@@ -1,4 +1,5 @@
-import { SignInButton, useClerk } from "@clerk/clerk-react";
+import { SignInButton, useUser } from "@clerk/clerk-react";
+import { useState } from "react";
 
 const C = {
   crimson: "#8B0000",
@@ -32,20 +33,50 @@ const TIERS = [
     cta: "Get Lifetime Access",
   },
   {
+    id: "pdf",
+    label: "PDF Study Guide",
+    price: "$17.00",
+    period: "one-time",
+    features: ["HESI A2 & TEAS 7 guide", "Delivered to your email", "Study offline anytime"],
+    highlight: false,
+    cta: "Get the PDF Guide",
+  },
+  {
     id: "bundle",
-    label: "Bundle",
+    label: "Lifetime Bundle",
     price: "$24.99",
     period: "one-time",
-    features: ["Everything in Lifetime", "Bonus PDF Study Guide", "Never expires"],
+    features: ["Everything in Lifetime", "PDF Study Guide included", "Best value", "Never expires"],
     highlight: false,
     cta: "Get the Bundle",
   },
 ];
 
-// Replace this URL with your actual Beacons store link
-const BEACONS_URL = "https://beacons.ai/YOUR_STORE_LINK";
+// Product type keys match the api/create-checkout.js handler
+const PRODUCT_KEYS = {
+  monthly: "monthly",
+  lifetime: "lifetime",
+  pdf: "pdf",
+  bundle: "bundle",
+};
+
+async function startCheckout(productType, userId, userEmail) {
+  const res = await fetch("/api/create-checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productType, userId, userEmail }),
+  });
+  const data = await res.json();
+  if (data.url) {
+    window.location.href = data.url;
+  } else {
+    alert("Something went wrong starting checkout. Please try again.");
+  }
+}
 
 export default function LandingGate({ logoSrc }) {
+  const { user } = useUser();
+  const [loading, setLoading] = useState(null);
   return (
     <div style={{
       minHeight: "100vh",
@@ -249,24 +280,34 @@ export default function LandingGate({ logoSrc }) {
               ))}
             </ul>
 
-            <a
-              href={BEACONS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={async () => {
+                setLoading(tier.id);
+                await startCheckout(
+                  tier.id,
+                  user?.id || "",
+                  user?.emailAddresses?.[0]?.emailAddress || ""
+                );
+                setLoading(null);
+              }}
+              disabled={loading === tier.id}
               style={{
                 display: "block",
+                width: "100%",
                 background: tier.highlight ? C.gold : C.crimson,
                 color: tier.highlight ? C.dark : C.white,
                 padding: "12px 0",
                 borderRadius: 7,
                 fontWeight: 700,
                 fontSize: 14,
-                textDecoration: "none",
+                border: "none",
+                cursor: loading === tier.id ? "wait" : "pointer",
                 letterSpacing: 0.3,
+                opacity: loading === tier.id ? 0.7 : 1,
               }}
             >
-              {tier.cta}
-            </a>
+              {loading === tier.id ? "Loading…" : tier.cta}
+            </button>
           </div>
         ))}
       </section>
